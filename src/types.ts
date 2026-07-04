@@ -33,3 +33,22 @@ export interface PlaySession {
   startedAt: string
   savedAt: string
 }
+
+export interface ParsedSlotItem {
+  itemName: string
+  values: Partial<Record<'1' | '2' | '3' | '4' | '5' | '6', number>>
+}
+
+export interface ParsedSlotInfo {
+  machineName: string
+  items: ParsedSlotItem[]
+}
+
+export interface MachineInfoFetchResponse {
+  success: boolean
+  title?: string
+  text?: string
+  sourceUrl?: string
+  parsed?: ParsedSlotInfo
+  error?: string
+}

@@ -10,6 +10,7 @@
 - 設定1〜6の参考値との近似比較
 - 機種データ、実戦履歴、進行中実戦のlocalStorage保存
 - 登録済み機種検索と情報元URLの保存
+- 情報元URLからのページ取得、参考値候補の抽出、確認・修正後の保存
 - スマートフォン優先のダークUI
 
 ## 開発
@@ -39,7 +40,12 @@ pnpm dev
 - `src/types.ts`: データ型
 - `src/services/storage.ts`: localStorage永続化
 - `src/services/machineSearch.ts`: 将来の検索・取得・解析インターフェース
+- `src/services/machineInfoFetcher.ts`: Vercel Functionとの通信
 - `src/utils/probability.ts`: 確率計算と参考設定比較
+- `src/utils/parseSlotInfo.ts`: 設定1〜6と確率表記の抽出
 - `src/data/sample.ts`: 初期サンプル機種
+- `api/fetch-machine-info.ts`: 外部ページを安全制限付きで取得するVercel Function
+
+URL取得はログインやアクセス制限を回避せず、HTMLまたはテキストの公開ページをユーザー操作時に1回だけ取得します。抽出結果は自動保存されず、確認・修正後にユーザーが保存します。
 
 以前作成したSwiftUI版は `SlotCounter/` と `SlotCounter.xcodeproj/` に残しています。Web版はルートの `package.json` から起動します。

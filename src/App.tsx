@@ -1,14 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { sampleMachine } from './data/sample'
 import { searchMachineInfo } from './services/machineSearch'
+import { fetchMachineInfo } from './services/machineInfoFetcher'
 import { storage } from './services/storage'
-import type { CountItemType, PlaySession, SlotMachine } from './types'
+import type { CountItemType, ParsedSlotItem, PlaySession, SlotMachine } from './types'
 import { nearestSetting, probability, probabilityText } from './utils/probability'
 
 type Route =
   | { page: 'home' }
   | { page: 'picker' }
   | { page: 'search' }
+  | { page: 'fetch' }
   | { page: 'register' }
   | { page: 'counter'; id: string }
   | { page: 'history' }
@@ -22,7 +24,7 @@ function parseRoute(): Route {
   const [page, id] = value.split('/')
   if (page === 'counter' && id) return { page: 'counter', id }
   if (page === 'history' && id) return { page: 'historyDetail', id }
-  if (page === 'picker' || page === 'search' || page === 'register' || page === 'history') return { page }
+  if (page === 'picker' || page === 'search' || page === 'fetch' || page === 'register' || page === 'history') return { page }
   return { page: 'home' }
 }
 
@@ -58,6 +60,7 @@ function App() {
   let content
   if (route.page === 'picker') content = <MachinePicker machines={machines} />
   else if (route.page === 'search') content = <SearchScreen machines={machines} />
+  else if (route.page === 'fetch') content = <MachineInfoFetchScreen onSave={saveMachine} />
   else if (route.page === 'register') content = <RegisterScreen onSave={saveMachine} />
   else if (route.page === 'counter') {
     const machine = machines.find((item) => item.id === route.id) ?? sampleMachine
@@ -110,7 +113,8 @@ function HomeScreen({ active }: { active: PlaySession | null }) {
 
       <section className="menu-grid" aria-label="メニュー">
         <MenuCard icon="⌕" title="機種検索" subtitle="登録済みデータから探す" path="search" />
-        <MenuCard icon="＋" title="機種データ登録" subtitle="参考確率を手動入力" path="register" />
+        <MenuCard icon="↧" title="URLから情報取得" subtitle="抽出後に確認して登録" path="fetch" />
+        <MenuCard icon="＋" title="機種データ登録" subtitle="参考確率を手動入力" path="register" wide />
         <MenuCard icon="◷" title="実戦履歴" subtitle="過去のカウントを確認" path="history" wide />
       </section>
 
@@ -162,9 +166,9 @@ function SearchScreen({ machines }: { machines: SlotMachine[] }) {
     setSearching(false)
   }
 
-  const registerFromUrl = () => {
-    sessionStorage.setItem('slot-counter:pending-url', sourceUrl)
-    go('register')
+  const fetchFromUrl = () => {
+    sessionStorage.setItem('slot-counter:fetch-url', sourceUrl)
+    go('fetch')
   }
 
   return (
@@ -186,11 +190,136 @@ function SearchScreen({ machines }: { machines: SlotMachine[] }) {
         ))}
       </section>
       <section className="section-block url-panel">
-        <div className="eyebrow">SOURCE URL</div><h2>情報元URLから登録</h2>
-        <p>自動取得は準備中です。MVPではURLを控えて、参考数値を手動入力できます。</p>
+        <div className="eyebrow">SOURCE URL</div><h2>情報元URLから取得</h2>
+        <p>対象ページを1回取得し、設定参考値の候補を抽出します。保存前に必ず内容をご確認ください。</p>
         <input type="url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://example.com/machine" />
-        <button className="outline-button" onClick={registerFromUrl}>手動登録へ進む</button>
+        <button className="outline-button" onClick={fetchFromUrl}>取得画面へ進む</button>
       </section>
+    </main>
+  )
+}
+
+interface ExtractedItemDraft { id: string; itemName: string; probabilities: string[] }
+
+function extractedDraft(item?: ParsedSlotItem): ExtractedItemDraft {
+  return {
+    id: uid(),
+    itemName: item?.itemName ?? '',
+    probabilities: Array.from({ length: 6 }, (_, index) => item?.values[String(index + 1) as keyof ParsedSlotItem['values']]?.toString() ?? ''),
+  }
+}
+
+function MachineInfoFetchScreen({ onSave }: { onSave: (machine: SlotMachine) => void }) {
+  const [url, setUrl] = useState(() => sessionStorage.getItem('slot-counter:fetch-url') ?? '')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [title, setTitle] = useState('')
+  const [machineName, setMachineName] = useState('')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [rawText, setRawText] = useState('')
+  const [items, setItems] = useState<ExtractedItemDraft[]>([])
+
+  useEffect(() => () => sessionStorage.removeItem('slot-counter:fetch-url'), [])
+
+  const runFetch = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+    if (!url.trim()) return setError('情報元URLを入力してください。')
+    setLoading(true)
+    try {
+      const result = await fetchMachineInfo(url.trim())
+      const parsedItems = result.parsed?.items ?? []
+      setTitle(result.title ?? '')
+      setRawText(result.text ?? '')
+      setSourceUrl(result.sourceUrl ?? url.trim())
+      setMachineName(result.parsed?.machineName || result.title || '')
+      setItems(parsedItems.length ? parsedItems.map((item) => extractedDraft(item)) : [extractedDraft()])
+      setNotice(parsedItems.length
+        ? `${parsedItems.length}項目を抽出しました。数値を確認・修正してから保存してください。`
+        : 'ページは取得できましたが数値を抽出できませんでした。下の表へ手動入力してください。')
+    } catch (fetchError) {
+      setError(`${fetchError instanceof Error ? fetchError.message : '自動取得できませんでした。'} 手動入力してください。`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateItem = (index: number, patch: Partial<ExtractedItemDraft>) => {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  }
+  const updateProbability = (itemIndex: number, settingIndex: number, value: string) => {
+    const probabilities = [...items[itemIndex].probabilities]
+    probabilities[settingIndex] = value
+    updateItem(itemIndex, { probabilities })
+  }
+  const fallbackToManual = () => {
+    sessionStorage.setItem('slot-counter:pending-url', sourceUrl || url)
+    go('register')
+  }
+  const save = () => {
+    setError('')
+    const validItems = items.filter((item) => item.itemName.trim())
+    const names = validItems.map((item) => item.itemName.trim())
+    if (!machineName.trim()) return setError('機種名を入力してください。')
+    if (!validItems.length) return setError('カウント項目を1つ以上入力してください。')
+    if (new Set(names).size !== names.length) return setError('同じ名前の項目は保存できません。')
+
+    const machine: SlotMachine = {
+      id: uid(),
+      name: machineName.trim(),
+      memo: `URLから取得した候補を確認・修正して登録${title ? `（ページタイトル：${title}）` : ''}`,
+      sourceUrl: sourceUrl || url.trim(),
+      createdAt: new Date().toISOString(),
+      countItems: validItems.map((item) => ({ id: uid(), name: item.itemName.trim(), type: inferItemType(item.itemName) })),
+      settingValues: validItems.flatMap((item) => item.probabilities.flatMap((raw, index) => {
+        const value = Number(raw.replace(',', '.'))
+        return value > 0 ? [{ id: uid(), itemName: item.itemName.trim(), settingNumber: index + 1, probability: value }] : []
+      })),
+    }
+    onSave(machine)
+    go('picker')
+  }
+
+  return (
+    <main className="screen">
+      <Header title="機種情報取得" eyebrow="URL IMPORT" />
+      <form className="fetch-panel" onSubmit={runFetch}>
+        <label>情報元URL<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/slot-machine" disabled={loading} /></label>
+        <button className="primary-button" disabled={loading}>{loading ? <><span className="spinner" />取得中…</> : 'ページを取得して数値を抽出'}</button>
+        <p>公開されたHTMLページを1回だけ取得します。アクセス制限の回避やログインが必要なページの取得は行いません。</p>
+      </form>
+
+      {error && <section className="fetch-error"><strong>自動取得できませんでした。</strong><p>{error}</p><button className="outline-button" onClick={fallbackToManual}>手動入力へ切り替える</button></section>}
+
+      {items.length > 0 && (
+        <section className="preview-section">
+          <div className="preview-badge">確認・修正が必要です</div>
+          <h2>抽出結果プレビュー</h2>
+          {notice && <p className="fetch-notice">{notice}</p>}
+          <label>機種名<input value={machineName} onChange={(event) => setMachineName(event.target.value)} /></label>
+          <label>情報元URL<input type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /></label>
+
+          <div className="extracted-items">
+            {items.map((item, itemIndex) => (
+              <article className="extracted-item" key={item.id}>
+                <div className="section-title"><strong>項目 {itemIndex + 1}</strong><button type="button" className="text-danger" onClick={() => setItems(items.filter((_, index) => index !== itemIndex))}>削除</button></div>
+                <input aria-label={`項目${itemIndex + 1}の名前`} value={item.itemName} onChange={(event) => updateItem(itemIndex, { itemName: event.target.value })} placeholder="例：REG、ブドウ" />
+                <div className="extracted-grid">
+                  {item.probabilities.map((value, settingIndex) => (
+                    <label key={settingIndex}><span>設定{settingIndex + 1}</span><span>1/<input aria-label={`${item.itemName || `項目${itemIndex + 1}`} 設定${settingIndex + 1}`} inputMode="decimal" value={value} onChange={(event) => updateProbability(itemIndex, settingIndex, event.target.value)} placeholder="-" /></span></label>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+          <button className="outline-button" type="button" onClick={() => setItems([...items, extractedDraft()])}>＋ 項目を追加</button>
+          {rawText && <details className="raw-preview"><summary>抽出元テキストを確認</summary><pre>{rawText.slice(0, 8_000)}</pre></details>}
+          <p className="confirmation-note">抽出精度は完全ではありません。情報元ページと照合し、誤りがないことを確認してから保存してください。</p>
+          <button className="primary-button full-button" type="button" onClick={save}>確認した内容で機種データを保存</button>
+        </section>
+      )}
     </main>
   )
 }
@@ -365,13 +494,20 @@ function BottomNav({ active }: { active: Route['page'] }) {
     <nav className="bottom-nav" aria-label="メインナビゲーション">
       <button className={active === 'home' ? 'active' : ''} onClick={() => go()}><span>⌂</span>ホーム</button>
       <button className={active === 'picker' || active === 'counter' ? 'active' : ''} onClick={() => go('picker')}><span>＋</span>カウント</button>
-      <button className={active === 'search' || active === 'register' ? 'active' : ''} onClick={() => go('search')}><span>⌕</span>機種</button>
+      <button className={active === 'search' || active === 'fetch' || active === 'register' ? 'active' : ''} onClick={() => go('search')}><span>⌕</span>機種</button>
       <button className={active === 'history' || active === 'historyDetail' ? 'active' : ''} onClick={() => go('history')}><span>◷</span>履歴</button>
     </nav>
   )
 }
 
 function NotFound() { return <main className="screen"><Header title="データがありません" /><div className="empty-card large">対象の履歴を確認できませんでした。</div></main> }
+function inferItemType(itemName: string): CountItemType {
+  const name = itemName.toUpperCase()
+  if (name.includes('BIG') || name.includes('REG') || name.includes('合算') || name.includes('ボーナス')) return 'bonus'
+  if (name.includes('強') || name.includes('弱') || name.includes('チャンス') || name.includes('レア')) return 'rareRole'
+  if (name.includes('ブドウ') || name.includes('ぶどう') || name.includes('チェリー') || name.includes('スイカ')) return 'smallRole'
+  return 'custom'
+}
 function typeLabel(type: CountItemType) { return ({ bonus: 'BONUS', smallRole: 'SMALL ROLE', rareRole: 'RARE ROLE', custom: 'CUSTOM' })[type] }
 function dateText(value: string) { return new Intl.DateTimeFormat('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 
