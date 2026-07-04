@@ -1,0 +1,41 @@
+# スロット小役カウンター＆設定判別サポート（Web MVP）
+
+スマートフォンのブラウザで利用できる、React + TypeScript + Vite製の小役カウントツールです。登録した参考値との比較であり、実際の設定・勝利・将来の結果を保証するものではありません。
+
+## 主な機能
+
+- サンプル機種／手動登録機種での実戦カウント
+- 総ゲーム数と各項目の明示的な `+` / `-` 操作
+- 小役・ボーナス・合算確率の自動計算
+- 設定1〜6の参考値との近似比較
+- 機種データ、実戦履歴、進行中実戦のlocalStorage保存
+- 登録済み機種検索と情報元URLの保存
+- スマートフォン優先のダークUI
+
+## 開発
+
+```bash
+pnpm install
+pnpm dev
+```
+
+本番ビルドは `pnpm build`、ローカル確認は `pnpm preview` で行えます。
+
+## Vercel
+
+リポジトリをVercelへインポートし、Framework Presetを `Vite` に設定してください。
+
+- Build Command: `pnpm build`
+- Output Directory: `dist`
+
+## 構成
+
+- `src/App.tsx`: 画面、ナビゲーション、カウント操作
+- `src/styles.css`: スマートフォン優先のUI
+- `src/types.ts`: データ型
+- `src/services/storage.ts`: localStorage永続化
+- `src/services/machineSearch.ts`: 将来の検索・取得・解析インターフェース
+- `src/utils/probability.ts`: 確率計算と参考設定比較
+- `src/data/sample.ts`: 初期サンプル機種
+
+以前作成したSwiftUI版は `SlotCounter/` と `SlotCounter.xcodeproj/` に残しています。Web版はルートの `package.json` から起動します。
