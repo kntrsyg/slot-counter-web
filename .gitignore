@@ -1,0 +1,12 @@
+node_modules/
+dist/
+outputs/
+work/
+SlotCounter/
+SlotCounter.xcodeproj/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.vercel/
+.agents/
+.codex/
